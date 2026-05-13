@@ -1,3 +1,4 @@
+package week_1;
 // import javax.management.Notification;
 
 interface NotificationChannel{

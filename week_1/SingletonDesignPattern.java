@@ -1,3 +1,4 @@
+package week_1;
 
 class Logger{
     // only 1 object is needed

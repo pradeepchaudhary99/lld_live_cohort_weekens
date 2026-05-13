@@ -1,3 +1,4 @@
+package week_1;
 // SOLID Principles Demonstration in ONE FILE
 
 // =======================
