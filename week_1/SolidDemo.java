@@ -63,9 +63,7 @@ class PremiumCustomerDiscount implements DiscountStrategy {
     public double calculate() { return 20; }
 }
 
-class DiwaliCustomerDiscount implements DiscountStrategy{
-
-}
+cl 
 
 //Dicoupling...
 // 
