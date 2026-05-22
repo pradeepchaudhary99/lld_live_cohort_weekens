@@ -1,5 +1,6 @@
 package week_4;
 
+import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -98,6 +99,15 @@ class ElevatorSystem{
     List<Elevator> elevators;
     List<Thread> threads;
 
+    public ElevatorSytstem(int numberOfElevators){
+        for(int i = 0; i < numberOfElevators; i++){
+            Elevator e = new Elevator();
+            Thread t = new Thread(e);
+            t.start();
+            threads.add(t);
+            elevators.add(e);
+        }
+    }
 }
 
 
