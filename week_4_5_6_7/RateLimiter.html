@@ -1,0 +1,1068 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Rate Limiter — Deep Dive Notes</title>
+<link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet"/>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#07080F;
+  --surface:#0F1120;
+  --surface2:#161929;
+  --border:#1E2238;
+  --text:#E2E4F0;
+  --muted:#5A6080;
+  --orange:#FF7A2F;
+  --yellow:#FFD166;
+  --green:#06D6A0;
+  --blue:#3D9EFF;
+  --pink:#FF4D9E;
+  --purple:#A855F7;
+  --cyan:#22D3EE;
+  --font-mono:'Fira Code',monospace;
+  --font-display:'Syne',sans-serif;
+}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--text);font-family:var(--font-display);line-height:1.6;font-size:15px}
+
+/* NAV */
+nav{
+  position:sticky;top:0;z-index:100;
+  background:rgba(7,8,15,0.92);backdrop-filter:blur(12px);
+  border-bottom:1px solid var(--border);
+  padding:12px 32px;
+  display:flex;align-items:center;gap:24px;flex-wrap:wrap;
+}
+.nav-brand{font-size:16px;font-weight:800;color:var(--orange);letter-spacing:-0.5px;white-space:nowrap}
+.nav-links{display:flex;gap:4px;flex-wrap:wrap}
+.nav-links a{
+  font-family:var(--font-mono);font-size:11px;font-weight:500;
+  color:var(--muted);text-decoration:none;
+  padding:5px 12px;border-radius:6px;border:1px solid transparent;
+  transition:all .2s;white-space:nowrap;
+}
+.nav-links a:hover{color:var(--text);background:var(--surface2);border-color:var(--border)}
+
+/* LAYOUT */
+.container{max-width:1100px;margin:0 auto;padding:0 24px}
+
+/* HERO */
+.hero{
+  padding:64px 24px 48px;
+  max-width:1100px;margin:0 auto;
+  border-bottom:1px solid var(--border);
+}
+.hero-tag{
+  display:inline-block;font-family:var(--font-mono);font-size:11px;letter-spacing:3px;
+  text-transform:uppercase;color:var(--orange);
+  background:rgba(255,122,47,0.1);border:1px solid rgba(255,122,47,0.25);
+  padding:4px 14px;border-radius:20px;margin-bottom:20px;
+}
+.hero h1{
+  font-size:clamp(32px,6vw,58px);font-weight:800;line-height:1.05;
+  letter-spacing:-2px;margin-bottom:16px;
+  background:linear-gradient(135deg,#fff 40%,var(--orange));
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+}
+.hero-sub{font-size:16px;color:var(--muted);max-width:600px;line-height:1.7}
+
+/* SECTION */
+section{padding:56px 0;border-bottom:1px solid var(--border)}
+.section-num{
+  font-family:var(--font-mono);font-size:11px;color:var(--orange);
+  letter-spacing:3px;text-transform:uppercase;margin-bottom:8px;
+}
+.section-title{
+  font-size:clamp(22px,4vw,32px);font-weight:800;letter-spacing:-1px;
+  margin-bottom:24px;
+}
+.section-title span{color:var(--orange)}
+
+/* CARDS */
+.card-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin:24px 0}
+.card{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:14px;padding:20px;
+  transition:transform .2s,box-shadow .2s;
+}
+.card:hover{transform:translateY(-3px);box-shadow:0 12px 40px rgba(0,0,0,0.5)}
+.card-icon{font-size:28px;margin-bottom:12px}
+.card-title{font-size:14px;font-weight:700;margin-bottom:6px}
+.card-body{font-size:13px;color:var(--muted);line-height:1.6}
+
+/* HIGHLIGHT BOX */
+.hbox{
+  border-radius:12px;padding:20px 24px;margin:20px 0;
+  border-left:4px solid;
+}
+.hbox.orange{background:rgba(255,122,47,0.08);border-color:var(--orange)}
+.hbox.green{background:rgba(6,214,160,0.08);border-color:var(--green)}
+.hbox.blue{background:rgba(61,158,255,0.08);border-color:var(--blue)}
+.hbox.pink{background:rgba(255,77,158,0.08);border-color:var(--pink)}
+.hbox.yellow{background:rgba(255,209,102,0.08);border-color:var(--yellow)}
+.hbox-title{font-size:13px;font-weight:700;margin-bottom:8px;text-transform:uppercase;letter-spacing:1px}
+.hbox p,.hbox li{font-size:13px;color:var(--muted);line-height:1.7}
+.hbox li{margin-left:20px;margin-bottom:4px}
+
+/* CODE */
+pre{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:12px;padding:24px;overflow-x:auto;
+  font-family:var(--font-mono);font-size:13px;line-height:1.8;
+  margin:20px 0;position:relative;
+}
+pre .ln{color:#2D3250;user-select:none;margin-right:20px;min-width:28px;display:inline-block;text-align:right}
+.kw{color:var(--purple)}
+.ty{color:var(--cyan)}
+.fn{color:var(--yellow)}
+.st{color:var(--green)}
+.cm{color:#3D4870;font-style:italic}
+.nu{color:var(--orange)}
+.an{color:var(--pink)}
+
+/* ALGO TABLE */
+.algo-table{width:100%;border-collapse:collapse;margin:20px 0;font-size:13px}
+.algo-table th{
+  background:var(--surface2);padding:12px 16px;text-align:left;
+  font-family:var(--font-mono);font-size:11px;letter-spacing:1px;
+  text-transform:uppercase;color:var(--muted);
+  border-bottom:2px solid var(--border);
+}
+.algo-table td{
+  padding:12px 16px;border-bottom:1px solid var(--border);
+  vertical-align:top;line-height:1.6;
+}
+.algo-table tr:hover td{background:var(--surface)}
+.badge{
+  display:inline-block;font-family:var(--font-mono);font-size:10px;
+  padding:2px 8px;border-radius:10px;font-weight:600;
+}
+.badge.g{background:rgba(6,214,160,0.15);color:var(--green)}
+.badge.y{background:rgba(255,209,102,0.15);color:var(--yellow)}
+.badge.r{background:rgba(255,77,158,0.15);color:var(--pink)}
+
+/* SVG DIAGRAM */
+.diagram-wrap{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:16px;padding:24px;margin:24px 0;overflow-x:auto;
+}
+.diagram-title{
+  font-family:var(--font-mono);font-size:11px;color:var(--muted);
+  letter-spacing:2px;text-transform:uppercase;margin-bottom:16px;
+}
+
+/* TABS */
+.tab-bar{display:flex;gap:6px;margin-bottom:0;flex-wrap:wrap}
+.tab-btn{
+  font-family:var(--font-mono);font-size:12px;font-weight:500;
+  padding:8px 18px;border-radius:8px 8px 0 0;
+  border:1px solid var(--border);border-bottom:none;
+  background:var(--surface2);color:var(--muted);cursor:pointer;
+  transition:all .2s;
+}
+.tab-btn.active{background:var(--surface);color:var(--text);border-color:var(--border)}
+.tab-content{display:none;background:var(--surface);border:1px solid var(--border);border-radius:0 12px 12px 12px;padding:0}
+.tab-content.active{display:block}
+.tab-content pre{border:none;border-radius:0 12px 12px 12px;margin:0}
+
+/* FLOW */
+.flow{display:flex;align-items:center;gap:0;flex-wrap:wrap;margin:20px 0}
+.flow-box{
+  background:var(--surface2);border:1px solid var(--border);
+  border-radius:10px;padding:10px 16px;font-size:13px;font-weight:600;
+  white-space:nowrap;
+}
+.flow-arrow{color:var(--muted);font-size:20px;padding:0 8px}
+.flow-box.hl{border-color:var(--orange);color:var(--orange);background:rgba(255,122,47,0.08)}
+.flow-box.ok{border-color:var(--green);color:var(--green);background:rgba(6,214,160,0.08)}
+.flow-box.no{border-color:var(--pink);color:var(--pink);background:rgba(255,77,158,0.08)}
+
+/* TWO COL */
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+@media(max-width:700px){.two-col{grid-template-columns:1fr}}
+
+ul.notes{list-style:none;padding:0}
+ul.notes li{
+  padding:10px 0 10px 24px;border-bottom:1px solid var(--border);
+  font-size:14px;position:relative;color:var(--muted);
+}
+ul.notes li::before{content:'▸';position:absolute;left:0;color:var(--orange)}
+ul.notes li strong{color:var(--text)}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="nav-brand">⚡ Rate Limiter</div>
+  <div class="nav-links">
+    <a href="#intro">Intro</a>
+    <a href="#why">Why</a>
+    <a href="#algorithms">Algorithms</a>
+    <a href="#token-bucket">Token Bucket</a>
+    <a href="#architecture">Architecture</a>
+    <a href="#code">Java Code</a>
+    <a href="#comparison">Comparison</a>
+  </div>
+</nav>
+
+<!-- HERO -->
+<div class="hero">
+  <div class="hero-tag">System Design Notes</div>
+  <h1>Rate Limiting<br/>Deep Dive</h1>
+  <p class="hero-sub">Everything you need to know about rate limiting — concepts, four algorithms, architecture patterns, and production-ready Java code. Token Bucket explored in full depth.</p>
+</div>
+
+<!-- SECTION 1: INTRO -->
+<section id="intro">
+<div class="container">
+  <div class="section-num">01 — Introduction</div>
+  <h2 class="section-title">What is <span>Rate Limiting?</span></h2>
+  <p style="color:var(--muted);max-width:700px;margin-bottom:24px">A rate limiter controls the rate of traffic sent or received by a system. It restricts how many requests a client can make in a given time window. Requests beyond the limit are either <strong style="color:var(--pink)">rejected (429)</strong> or <strong style="color:var(--yellow)">queued</strong>.</p>
+
+  <div class="card-grid">
+    <div class="card">
+      <div class="card-icon">🛡️</div>
+      <div class="card-title" style="color:var(--orange)">DoS Protection</div>
+      <div class="card-body">Prevents denial-of-service attacks from overwhelming servers with massive request floods.</div>
+    </div>
+    <div class="card">
+      <div class="card-icon">⚖️</div>
+      <div class="card-title" style="color:var(--green)">Fair Usage</div>
+      <div class="card-body">Ensures no single user or tenant monopolizes shared infrastructure resources.</div>
+    </div>
+    <div class="card">
+      <div class="card-icon">💰</div>
+      <div class="card-title" style="color:var(--blue)">Cost Control</div>
+      <div class="card-body">Prevents runaway API costs in cloud billing scenarios and third-party API usage.</div>
+    </div>
+    <div class="card">
+      <div class="card-icon">📊</div>
+      <div class="card-title" style="color:var(--yellow)">SLA Enforcement</div>
+      <div class="card-body">Tiered rate limits enforce service level agreements — free vs paid plans.</div>
+    </div>
+  </div>
+
+  <div class="hbox orange">
+    <div class="hbox-title">📌 Key Interview Point</div>
+    <p>Rate limiting can be applied at different granularities: <strong style="color:var(--text)">per user ID, per IP, per API key, per endpoint, or globally per service.</strong> Always clarify the scope in system design interviews.</p>
+  </div>
+</div>
+</section>
+
+<!-- SECTION 2: WHERE TO PLACE -->
+<section id="why">
+<div class="container">
+  <div class="section-num">02 — Placement</div>
+  <h2 class="section-title">Where Does It <span>Live?</span></h2>
+
+  <!-- ARCHITECTURE DIAGRAM SVG -->
+  <div class="diagram-wrap">
+    <div class="diagram-title">Rate Limiter in Service Architecture</div>
+    <svg viewBox="0 0 900 320" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:900px;display:block">
+      <defs>
+        <marker id="arr" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+          <polygon points="0 0,8 3,0 6" fill="#5A6080"/>
+        </marker>
+        <marker id="arr-ok" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+          <polygon points="0 0,8 3,0 6" fill="#06D6A0"/>
+        </marker>
+        <marker id="arr-no" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+          <polygon points="0 0,8 3,0 6" fill="#FF4D9E"/>
+        </marker>
+      </defs>
+
+      <!-- Client -->
+      <rect x="20" y="120" width="90" height="60" rx="10" fill="#161929" stroke="#FF7A2F" stroke-width="1.5"/>
+      <text x="65" y="146" text-anchor="middle" fill="#FF7A2F" font-family="Fira Code" font-size="11">Client</text>
+      <text x="65" y="162" text-anchor="middle" fill="#5A6080" font-family="Fira Code" font-size="10">Browser/</text>
+      <text x="65" y="174" text-anchor="middle" fill="#5A6080" font-family="Fira Code" font-size="10">Mobile</text>
+
+      <!-- Arrow -->
+      <line x1="110" y1="150" x2="160" y2="150" stroke="#5A6080" stroke-width="1.5" marker-end="url(#arr)"/>
+      <text x="135" y="143" text-anchor="middle" fill="#5A6080" font-family="Fira Code" font-size="10">req</text>
+
+      <!-- API Gateway / Rate Limiter -->
+      <rect x="162" y="80" width="130" height="140" rx="12" fill="#1A0D0A" stroke="#FF7A2F" stroke-width="2"/>
+      <rect x="162" y="80" width="130" height="32" rx="12" fill="#FF7A2F" opacity="0.15"/>
+      <rect x="162" y="100" width="130" height="12" fill="#FF7A2F" opacity="0.15"/>
+      <text x="227" y="103" text-anchor="middle" fill="#FF7A2F" font-family="Fira Code" font-size="11" font-weight="600">API Gateway</text>
+      <text x="227" y="128" text-anchor="middle" fill="#E2E4F0" font-family="Fira Code" font-size="12" font-weight="700">Rate Limiter</text>
+      <text x="227" y="148" text-anchor="middle" fill="#5A6080" font-family="Fira Code" font-size="10">✓ Token Bucket</text>
+      <text x="227" y="162" text-anchor="middle" fill="#5A6080" font-family="Fira Code" font-size="10">✓ Leaky Bucket</text>
+      <text x="227" y="176" text-anchor="middle" fill="#5A6080" font-family="Fira Code" font-size="10">✓ Fixed Window</text>
+      <text x="227" y="190" text-anchor="middle" fill="#5A6080" font-family="Fira Code" font-size="10">✓ Sliding Window</text>
+
+      <!-- Redis -->
+      <rect x="162" y="245" width="130" height="55" rx="10" fill="#161929" stroke="#22D3EE" stroke-width="1.5"/>
+      <text x="227" y="270" text-anchor="middle" fill="#22D3EE" font-family="Fira Code" font-size="11">Redis</text>
+      <text x="227" y="285" text-anchor="middle" fill="#5A6080" font-family="Fira Code" font-size="10">Counter Store</text>
+      <line x1="227" y1="220" x2="227" y2="245" stroke="#22D3EE" stroke-width="1.5" stroke-dasharray="4,3"/>
+
+      <!-- Allowed arrow -->
+      <line x1="292" y1="135" x2="370" y2="135" stroke="#06D6A0" stroke-width="1.5" marker-end="url(#arr-ok)"/>
+      <text x="331" y="128" text-anchor="middle" fill="#06D6A0" font-family="Fira Code" font-size="10">✓ allow</text>
+
+      <!-- Denied arrow -->
+      <line x1="292" y1="170" x2="370" y2="215" stroke="#FF4D9E" stroke-width="1.5" marker-end="url(#arr-no)"/>
+      <text x="350" y="198" text-anchor="middle" fill="#FF4D9E" font-family="Fira Code" font-size="10">✗ 429</text>
+
+      <!-- Services box -->
+      <rect x="372" y="70" width="160" height="220" rx="12" fill="#0F1120" stroke="#1E2238" stroke-width="1.5"/>
+      <text x="452" y="95" text-anchor="middle" fill="#5A6080" font-family="Fira Code" font-size="10" letter-spacing="2">SERVICES</text>
+
+      <rect x="390" y="104" width="124" height="38" rx="8" fill="#161929" stroke="#3D9EFF" stroke-width="1"/>
+      <text x="452" y="123" text-anchor="middle" fill="#3D9EFF" font-family="Fira Code" font-size="11">Auth Service</text>
+      <text x="452" y="136" text-anchor="middle" fill="#5A6080" font-family="Fira Code" font-size="10">/api/auth/*</text>
+
+      <rect x="390" y="155" width="124" height="38" rx="8" fill="#161929" stroke="#A855F7" stroke-width="1"/>
+      <text x="452" y="174" text-anchor="middle" fill="#A855F7" font-family="Fira Code" font-size="11">Order Service</text>
+      <text x="452" y="187" text-anchor="middle" fill="#5A6080" font-family="Fira Code" font-size="10">/api/orders/*</text>
+
+      <rect x="390" y="206" width="124" height="38" rx="8" fill="#161929" stroke="#FFD166" stroke-width="1"/>
+      <text x="452" y="225" text-anchor="middle" fill="#FFD166" font-family="Fira Code" font-size="11">Search Service</text>
+      <text x="452" y="238" text-anchor="middle" fill="#5A6080" font-family="Fira Code" font-size="10">/api/search/*</text>
+
+      <!-- 429 Response box -->
+      <rect x="372" y="220" width="120" height="38" rx="8" fill="#2A0A1A" stroke="#FF4D9E" stroke-width="1.5"/>
+      <text x="432" y="238" text-anchor="middle" fill="#FF4D9E" font-family="Fira Code" font-size="11">429 Too Many</text>
+      <text x="432" y="251" text-anchor="middle" fill="#FF4D9E" font-family="Fira Code" font-size="10">Requests</text>
+
+      <!-- Config store -->
+      <rect x="600" y="90" width="140" height="130" rx="12" fill="#161929" stroke="#1E2238" stroke-width="1.5"/>
+      <text x="670" y="115" text-anchor="middle" fill="#5A6080" font-family="Fira Code" font-size="10" letter-spacing="2">CONFIG</text>
+      <text x="670" y="138" text-anchor="middle" fill="#E2E4F0" font-family="Fira Code" font-size="12" font-weight="700">Limit Rules</text>
+      <text x="670" y="158" text-anchor="middle" fill="#5A6080" font-family="Fira Code" font-size="10">free: 100/hr</text>
+      <text x="670" y="172" text-anchor="middle" fill="#5A6080" font-family="Fira Code" font-size="10">pro: 1000/hr</text>
+      <text x="670" y="186" text-anchor="middle" fill="#5A6080" font-family="Fira Code" font-size="10">enterprise: ∞</text>
+      <text x="670" y="200" text-anchor="middle" fill="#5A6080" font-family="Fira Code" font-size="10">IP: 50/min</text>
+      <line x1="532" y1="150" x2="598" y2="150" stroke="#1E2238" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arr)"/>
+
+      <!-- Monitoring -->
+      <rect x="600" y="245" width="140" height="55" rx="12" fill="#161929" stroke="#1E2238" stroke-width="1.5"/>
+      <text x="670" y="270" text-anchor="middle" fill="#06D6A0" font-family="Fira Code" font-size="11">Monitoring</text>
+      <text x="670" y="285" text-anchor="middle" fill="#5A6080" font-family="Fira Code" font-size="10">Metrics / Alerts</text>
+
+      <!-- Legend -->
+      <text x="780" y="130" fill="#5A6080" font-family="Fira Code" font-size="10">── allowed</text>
+      <line x1="760" y1="127" x2="778" y2="127" stroke="#06D6A0" stroke-width="1.5"/>
+      <text x="780" y="150" fill="#5A6080" font-family="Fira Code" font-size="10">── rejected</text>
+      <line x1="760" y1="147" x2="778" y2="147" stroke="#FF4D9E" stroke-width="1.5"/>
+      <text x="780" y="170" fill="#5A6080" font-family="Fira Code" font-size="10">- - config</text>
+      <line x1="760" y1="167" x2="778" y2="167" stroke="#5A6080" stroke-width="1.5" stroke-dasharray="3,2"/>
+    </svg>
+  </div>
+
+  <div class="hbox blue">
+    <div class="hbox-title">💡 Request Flow</div>
+    <div class="flow">
+      <div class="flow-box">Client</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-box hl">Rate Limiter</div>
+      <div class="flow-arrow">↕</div>
+      <div class="flow-box" style="color:var(--cyan)">Redis Counter</div>
+      <div class="flow-arrow">→ allowed →</div>
+      <div class="flow-box ok">Service</div>
+    </div>
+    <div class="flow" style="margin-top:8px">
+      <div class="flow-box">Client</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-box hl">Rate Limiter</div>
+      <div class="flow-arrow">→ limit hit →</div>
+      <div class="flow-box no">429 Response</div>
+    </div>
+  </div>
+</div>
+</section>
+
+<!-- SECTION 3: ALGORITHMS -->
+<section id="algorithms">
+<div class="container">
+  <div class="section-num">03 — Algorithms Overview</div>
+  <h2 class="section-title">Four <span>Algorithms</span></h2>
+
+  <div class="card-grid">
+    <div class="card" style="border-color:#FF7A2F44">
+      <div class="card-icon">🪙</div>
+      <div class="card-title" style="color:var(--orange)">Token Bucket</div>
+      <div class="card-body">Tokens refill at constant rate up to capacity. Each request consumes 1 token. Allows controlled bursting. Most popular in practice.</div>
+    </div>
+    <div class="card" style="border-color:#06D6A044">
+      <div class="card-icon">🪣</div>
+      <div class="card-title" style="color:var(--green)">Leaky Bucket</div>
+      <div class="card-body">Requests queue up and drain at a constant rate. Excess overflows. No bursting — smoothest output rate. Good for traffic shaping.</div>
+    </div>
+    <div class="card" style="border-color:#3D9EFF44">
+      <div class="card-icon">🪟</div>
+      <div class="card-title" style="color:var(--blue)">Fixed Window</div>
+      <div class="card-body">Simple counter per time window. Resets at boundary. Vulnerable to burst at window edge — double rate attack possible.</div>
+    </div>
+    <div class="card" style="border-color:#A855F744">
+      <div class="card-icon">🔄</div>
+      <div class="card-title" style="color:var(--purple)">Sliding Window</div>
+      <div class="card-body">Rolling window with timestamp log or weighted hybrid. No boundary problem. Higher memory but most accurate. Preferred for strict APIs.</div>
+    </div>
+  </div>
+</div>
+</section>
+
+<!-- SECTION 4: TOKEN BUCKET DEEP DIVE -->
+<section id="token-bucket">
+<div class="container">
+  <div class="section-num">04 — Deep Dive</div>
+  <h2 class="section-title">Token Bucket <span>Algorithm</span></h2>
+
+  <!-- TOKEN BUCKET DIAGRAM -->
+  <div class="diagram-wrap">
+    <div class="diagram-title">Token Bucket — How It Works</div>
+    <svg viewBox="0 0 820 360" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:820px;display:block">
+      <defs>
+        <marker id="a1" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+          <polygon points="0 0,8 3,0 6" fill="#FFD166"/>
+        </marker>
+        <marker id="a2" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+          <polygon points="0 0,8 3,0 6" fill="#06D6A0"/>
+        </marker>
+        <marker id="a3" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+          <polygon points="0 0,8 3,0 6" fill="#FF4D9E"/>
+        </marker>
+        <marker id="a4" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+          <polygon points="0 0,8 3,0 6" fill="#FF7A2F"/>
+        </marker>
+      </defs>
+
+      <!-- Refill Source (top) -->
+      <rect x="60" y="20" width="140" height="52" rx="10" fill="#1A1200" stroke="#FFD166" stroke-width="1.5"/>
+      <text x="130" y="44" text-anchor="middle" fill="#FFD166" font-family="Fira Code" font-size="12" font-weight="700">Token Refiller</text>
+      <text x="130" y="62" text-anchor="middle" fill="#5A6080" font-family="Fira Code" font-size="10">+R tokens/second</text>
+
+      <!-- Refill arrow -->
+      <line x1="130" y1="72" x2="130" y2="108" stroke="#FFD166" stroke-width="1.5" marker-end="url(#a1)"/>
+
+      <!-- Bucket -->
+      <rect x="60" y="110" width="140" height="180" rx="12" fill="#12100A" stroke="#FF7A2F" stroke-width="2"/>
+      <text x="130" y="134" text-anchor="middle" fill="#FF7A2F" font-family="Fira Code" font-size="11" font-weight="700">TOKEN BUCKET</text>
+      <text x="130" y="150" text-anchor="middle" fill="#5A6080" font-family="Fira Code" font-size="10">capacity = C</text>
+
+      <!-- Tokens inside bucket -->
+      <circle cx="90" cy="175" r="12" fill="#FF7A2F" opacity="0.9"/>
+      <circle cx="118" cy="175" r="12" fill="#FF7A2F" opacity="0.9"/>
+      <circle cx="146" cy="175" r="12" fill="#FF7A2F" opacity="0.9"/>
+      <circle cx="174" cy="175" r="12" fill="#FF7A2F" opacity="0.9"/>
+      <circle cx="90" cy="202" r="12" fill="#FF7A2F" opacity="0.9"/>
+      <circle cx="118" cy="202" r="12" fill="#FF7A2F" opacity="0.9"/>
+      <circle cx="146" cy="202" r="12" fill="#FF7A2F" opacity="0.5" stroke-dasharray="3,2" stroke="#FF7A2F" fill-opacity="0.2"/>
+      <circle cx="174" cy="202" r="12" fill="#FF7A2F" opacity="0.5" stroke-dasharray="3,2" stroke="#FF7A2F" fill-opacity="0.2"/>
+      <circle cx="90" cy="229" r="12" fill="#FF7A2F" stroke-dasharray="3,2" stroke="#FF7A2F" fill-opacity="0.1"/>
+      <circle cx="118" cy="229" r="12" fill="#FF7A2F" stroke-dasharray="3,2" stroke="#FF7A2F" fill-opacity="0.1"/>
+      <circle cx="146" cy="229" r="12" fill="#FF7A2F" stroke-dasharray="3,2" stroke="#FF7A2F" fill-opacity="0.1"/>
+      <circle cx="174" cy="229" r="12" fill="#FF7A2F" stroke-dasharray="3,2" stroke="#FF7A2F" fill-opacity="0.1"/>
+
+      <text x="130" y="260" text-anchor="middle" fill="#FF7A2F" font-family="Fira Code" font-size="11">tokens = 6 / 12</text>
+      <text x="130" y="278" text-anchor="middle" fill="#5A6080" font-family="Fira Code" font-size="10">● = available</text>
+      <text x="130" y="292" text-anchor="middle" fill="#5A6080" font-family="Fira Code" font-size="10">○ = empty slot</text>
+
+      <!-- Incoming request -->
+      <rect x="290" y="60" width="130" height="52" rx="10" fill="#161929" stroke="#22D3EE" stroke-width="1.5"/>
+      <text x="355" y="84" text-anchor="middle" fill="#22D3EE" font-family="Fira Code" font-size="12" font-weight="700">Incoming</text>
+      <text x="355" y="102" text-anchor="middle" fill="#5A6080" font-family="Fira Code" font-size="10">Request</text>
+
+      <!-- Arrow from request to bucket -->
+      <line x1="290" y1="86" x2="205" y2="165" stroke="#22D3EE" stroke-width="1.5" marker-end="url(#a2)" stroke-dasharray="5,3"/>
+      <text x="255" y="118" fill="#22D3EE" font-family="Fira Code" font-size="10">consume</text>
+      <text x="258" y="130" fill="#22D3EE" font-family="Fira Code" font-size="10">1 token</text>
+
+      <!-- Decision -->
+      <!-- Diamond -->
+      <polygon points="355,155 415,185 355,215 295,185" fill="#161929" stroke="#FF7A2F" stroke-width="1.5"/>
+      <text x="355" y="181" text-anchor="middle" fill="#FF7A2F" font-family="Fira Code" font-size="11" font-weight="700">tokens</text>
+      <text x="355" y="195" text-anchor="middle" fill="#FF7A2F" font-family="Fira Code" font-size="11" font-weight="700">&gt;= 1 ?</text>
+
+      <!-- Yes path -->
+      <line x1="415" y1="185" x2="510" y2="130" stroke="#06D6A0" stroke-width="1.5" marker-end="url(#a2)"/>
+      <text x="470" y="145" fill="#06D6A0" font-family="Fira Code" font-size="10">YES</text>
+
+      <!-- No path -->
+      <line x1="415" y1="185" x2="510" y2="235" stroke="#FF4D9E" stroke-width="1.5" marker-end="url(#a3)"/>
+      <text x="470" y="225" fill="#FF4D9E" font-family="Fira Code" font-size="10">NO</text>
+
+      <!-- Allow box -->
+      <rect x="510" y="100" width="140" height="58" rx="10" fill="#061A12" stroke="#06D6A0" stroke-width="1.5"/>
+      <text x="580" y="126" text-anchor="middle" fill="#06D6A0" font-family="Fira Code" font-size="13" font-weight="700">✓ ALLOWED</text>
+      <text x="580" y="146" text-anchor="middle" fill="#5A6080" font-family="Fira Code" font-size="10">tokens -= 1</text>
+
+      <!-- Deny box -->
+      <rect x="510" y="205" width="140" height="58" rx="10" fill="#1A060C" stroke="#FF4D9E" stroke-width="1.5"/>
+      <text x="580" y="231" text-anchor="middle" fill="#FF4D9E" font-family="Fira Code" font-size="13" font-weight="700">✗ REJECTED</text>
+      <text x="580" y="251" text-anchor="middle" fill="#5A6080" font-family="Fira Code" font-size="10">HTTP 429</text>
+
+      <!-- Refill formula -->
+      <rect x="290" y="295" width="360" height="50" rx="10" fill="#0F1120" stroke="#1E2238" stroke-width="1"/>
+      <text x="470" y="318" text-anchor="middle" fill="#FFD166" font-family="Fira Code" font-size="11">tokens = min(capacity,  tokens + rate × Δt)</text>
+      <text x="470" y="335" text-anchor="middle" fill="#5A6080" font-family="Fira Code" font-size="10">Δt = elapsed time since last refill check</text>
+
+      <!-- Properties labels -->
+      <text x="680" y="90" fill="#5A6080" font-family="Fira Code" font-size="10">Properties:</text>
+      <text x="680" y="108" fill="#06D6A0" font-family="Fira Code" font-size="10">✓ Burst allowed</text>
+      <text x="680" y="124" fill="#06D6A0" font-family="Fira Code" font-size="10">✓ Smooth avg rate</text>
+      <text x="680" y="140" fill="#06D6A0" font-family="Fira Code" font-size="10">✓ Memory efficient</text>
+      <text x="680" y="156" fill="#FFD166" font-family="Fira Code" font-size="10">~ Race condition</text>
+      <text x="680" y="172" fill="#FFD166" font-family="Fira Code" font-size="10">  (use atomic ops)</text>
+    </svg>
+  </div>
+
+  <div class="two-col">
+    <div>
+      <div class="hbox orange">
+        <div class="hbox-title">⚙️ Key Parameters</div>
+        <ul>
+          <li><strong style="color:var(--text)">Capacity (C)</strong> — max tokens bucket holds = max burst size</li>
+          <li><strong style="color:var(--text)">Refill Rate (R)</strong> — tokens added per second = sustained rate</li>
+          <li><strong style="color:var(--text)">Current Tokens (T)</strong> — available tokens at any instant</li>
+          <li><strong style="color:var(--text)">Last Refill Time</strong> — timestamp of last token addition</li>
+        </ul>
+      </div>
+    </div>
+    <div>
+      <div class="hbox green">
+        <div class="hbox-title">✅ Pros &amp; ❌ Cons</div>
+        <ul>
+          <li><span style="color:var(--green)">+</span> Allows bursting up to capacity</li>
+          <li><span style="color:var(--green)">+</span> Simple and memory efficient (2 values per user)</li>
+          <li><span style="color:var(--green)">+</span> Smooth average throughput control</li>
+          <li><span style="color:var(--pink)">−</span> Race condition in distributed systems</li>
+          <li><span style="color:var(--pink)">−</span> Burst could still overload downstream</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="hbox yellow">
+    <div class="hbox-title">🔢 Worked Example</div>
+    <p>Capacity = 10, Rate = 2 tokens/sec.<br/>
+    User sends 10 requests instantly → all pass (uses all 10 tokens).<br/>
+    At t=5s → 10 tokens refilled. Next 10 requests pass again.<br/>
+    Sustained throughput = 2 req/sec. Burst = 10 req at once.</p>
+  </div>
+</div>
+</section>
+
+<!-- SECTION 5: JAVA CODE -->
+<section id="code">
+<div class="container">
+  <div class="section-num">05 — Implementation</div>
+  <h2 class="section-title">Java Code — <span>All Strategies</span></h2>
+  <p style="color:var(--muted);margin-bottom:24px">One file. All four algorithms. A <code style="color:var(--orange);background:var(--surface2);padding:2px 6px;border-radius:4px">RateLimiterStrategy</code> interface + a <code style="color:var(--orange);background:var(--surface2);padding:2px 6px;border-radius:4px">RateLimiterService</code> that shows how a real service would use them.</p>
+
+  <div class="tab-bar">
+    <button class="tab-btn active" onclick="showTab('interface')">Interface</button>
+    <button class="tab-btn" onclick="showTab('token')">Token Bucket</button>
+    <button class="tab-btn" onclick="showTab('leaky')">Leaky Bucket</button>
+    <button class="tab-btn" onclick="showTab('fixed')">Fixed Window</button>
+    <button class="tab-btn" onclick="showTab('sliding')">Sliding Window</button>
+    <button class="tab-btn" onclick="showTab('service')">Service Usage</button>
+  </div>
+
+  <!-- INTERFACE TAB -->
+  <div id="tab-interface" class="tab-content active">
+<pre><span class="cm">// ═══════════════════════════════════════════════════════
+// RateLimiterStrategy.java — Common Interface
+// ═══════════════════════════════════════════════════════</span>
+
+<span class="kw">package</span> com.example.ratelimiter;
+
+<span class="kw">public interface</span> <span class="ty">RateLimiterStrategy</span> {
+
+    <span class="cm">/**
+     * Check if a request from given key (userId / IP) is allowed.
+     * @param key  identifier (e.g. userId, IP, apiKey)
+     * @return     true if allowed, false if rate limited
+     */</span>
+    <span class="ty">boolean</span> <span class="fn">allowRequest</span>(<span class="ty">String</span> key);
+
+    <span class="cm">/** Human-readable name of the strategy */</span>
+    <span class="ty">String</span> <span class="fn">getName</span>();
+}
+
+
+<span class="cm">// ═══════════════════════════════════════════════════════
+// RateLimitResult.java — Rich result with metadata
+// ═══════════════════════════════════════════════════════</span>
+
+<span class="kw">public record</span> <span class="ty">RateLimitResult</span>(
+    <span class="ty">boolean</span>  allowed,
+    <span class="ty">int</span>      remainingTokens,
+    <span class="ty">long</span>     retryAfterMs,
+    <span class="ty">String</span>   strategy
+) {
+    <span class="kw">public static</span> <span class="ty">RateLimitResult</span> <span class="fn">allow</span>(<span class="ty">int</span> remaining, <span class="ty">String</span> strategy) {
+        <span class="kw">return new</span> <span class="ty">RateLimitResult</span>(<span class="kw">true</span>, remaining, <span class="nu">0</span>, strategy);
+    }
+    <span class="kw">public static</span> <span class="ty">RateLimitResult</span> <span class="fn">deny</span>(<span class="ty">long</span> retryMs, <span class="ty">String</span> strategy) {
+        <span class="kw">return new</span> <span class="ty">RateLimitResult</span>(<span class="kw">false</span>, <span class="nu">0</span>, retryMs, strategy);
+    }
+}</pre>
+  </div>
+
+  <!-- TOKEN BUCKET TAB -->
+  <div id="tab-token" class="tab-content">
+<pre><span class="cm">// ═══════════════════════════════════════════════════════
+// TokenBucketRateLimiter.java
+// Strategy: tokens refill at R/sec, max capacity C
+// Each request consumes 1 token
+// ═══════════════════════════════════════════════════════</span>
+
+<span class="kw">package</span> com.example.ratelimiter;
+
+<span class="kw">import</span> java.util.concurrent.ConcurrentHashMap;
+<span class="kw">import</span> java.util.concurrent.atomic.AtomicReference;
+
+<span class="kw">public class</span> <span class="ty">TokenBucketRateLimiter</span> <span class="kw">implements</span> <span class="ty">RateLimiterStrategy</span> {
+
+    <span class="cm">/** Snapshot stored per user: (tokens, lastRefillNanoTime) */</span>
+    <span class="kw">private record</span> <span class="ty">BucketState</span>(<span class="ty">double</span> tokens, <span class="ty">long</span> lastNanos) {}
+
+    <span class="kw">private final double</span> capacity;       <span class="cm">// max tokens = max burst</span>
+    <span class="kw">private final double</span> refillRatePerNs; <span class="cm">// tokens added per nanosecond</span>
+    <span class="kw">private final</span> <span class="ty">ConcurrentHashMap</span>&lt;<span class="ty">String</span>, <span class="ty">AtomicReference</span>&lt;<span class="ty">BucketState</span>&gt;&gt; buckets
+        = <span class="kw">new</span> <span class="ty">ConcurrentHashMap</span>&lt;&gt;();
+
+    <span class="cm">/**
+     * @param capacity        max tokens (burst capacity)
+     * @param refillRatePerSec tokens added per second
+     */</span>
+    <span class="kw">public</span> <span class="fn">TokenBucketRateLimiter</span>(<span class="ty">int</span> capacity, <span class="ty">double</span> refillRatePerSec) {
+        <span class="kw">this</span>.capacity = capacity;
+        <span class="kw">this</span>.refillRatePerNs = refillRatePerSec / <span class="nu">1_000_000_000.0</span>;
+    }
+
+    <span class="an">@Override</span>
+    <span class="kw">public boolean</span> <span class="fn">allowRequest</span>(<span class="ty">String</span> key) {
+        <span class="ty">AtomicReference</span>&lt;<span class="ty">BucketState</span>&gt; ref = buckets.computeIfAbsent(
+            key, k -> <span class="kw">new</span> <span class="ty">AtomicReference</span>&lt;&gt;(
+                <span class="kw">new</span> <span class="ty">BucketState</span>(capacity, System.nanoTime())
+            )
+        );
+
+        <span class="cm">// CAS loop — lock-free, thread-safe</span>
+        <span class="kw">while</span> (<span class="kw">true</span>) {
+            <span class="ty">BucketState</span> current = ref.get();
+            <span class="ty">long</span> now = System.nanoTime();
+
+            <span class="cm">// Compute refilled tokens since last check</span>
+            <span class="ty">double</span> elapsed = now - current.lastNanos();
+            <span class="ty">double</span> refilled = elapsed * refillRatePerNs;
+            <span class="ty">double</span> newTokens = Math.min(capacity, current.tokens() + refilled);
+
+            <span class="kw">if</span> (newTokens &lt; <span class="nu">1.0</span>) {
+                <span class="kw">return false</span>; <span class="cm">// Not enough tokens — rate limited</span>
+            }
+
+            <span class="ty">BucketState</span> updated = <span class="kw">new</span> <span class="ty">BucketState</span>(newTokens - <span class="nu">1.0</span>, now);
+
+            <span class="cm">// Atomically update — retry if another thread changed state</span>
+            <span class="kw">if</span> (ref.compareAndSet(current, updated)) {
+                <span class="kw">return true</span>;
+            }
+        }
+    }
+
+    <span class="kw">public int</span> <span class="fn">getRemainingTokens</span>(<span class="ty">String</span> key) {
+        <span class="ty">AtomicReference</span>&lt;<span class="ty">BucketState</span>&gt; ref = buckets.get(key);
+        <span class="kw">if</span> (ref == <span class="kw">null</span>) <span class="kw">return</span> (<span class="kw">int</span>) capacity;
+        <span class="ty">BucketState</span> s = ref.get();
+        <span class="ty">double</span> elapsed = System.nanoTime() - s.lastNanos();
+        <span class="kw">return</span> (<span class="kw">int</span>) Math.min(capacity, s.tokens() + elapsed * refillRatePerNs);
+    }
+
+    <span class="an">@Override</span>
+    <span class="kw">public</span> <span class="ty">String</span> <span class="fn">getName</span>() { <span class="kw">return</span> <span class="st">"TokenBucket"</span>; }
+}</pre>
+  </div>
+
+  <!-- LEAKY BUCKET TAB -->
+  <div id="tab-leaky" class="tab-content">
+<pre><span class="cm">// ═══════════════════════════════════════════════════════
+// LeakyBucketRateLimiter.java
+// Strategy: queue drains at fixed rate, overflow = reject
+// No bursting — guarantees constant output rate
+// ═══════════════════════════════════════════════════════</span>
+
+<span class="kw">package</span> com.example.ratelimiter;
+
+<span class="kw">import</span> java.util.concurrent.ConcurrentHashMap;
+
+<span class="kw">public class</span> <span class="ty">LeakyBucketRateLimiter</span> <span class="kw">implements</span> <span class="ty">RateLimiterStrategy</span> {
+
+    <span class="kw">private static class</span> <span class="ty">BucketState</span> {
+        <span class="ty">double</span> queueSize;    <span class="cm">// current requests in queue</span>
+        <span class="ty">long</span>   lastLeakNanos;
+        <span class="fn">BucketState</span>(<span class="ty">double</span> q, <span class="ty">long</span> t) { queueSize = q; lastLeakNanos = t; }
+    }
+
+    <span class="kw">private final double</span> capacity;      <span class="cm">// max queue depth</span>
+    <span class="kw">private final double</span> leakRatePerNs; <span class="cm">// requests drained per nanosecond</span>
+    <span class="kw">private final</span> <span class="ty">ConcurrentHashMap</span>&lt;<span class="ty">String</span>, <span class="ty">BucketState</span>&gt; buckets
+        = <span class="kw">new</span> <span class="ty">ConcurrentHashMap</span>&lt;&gt;();
+
+    <span class="kw">public</span> <span class="fn">LeakyBucketRateLimiter</span>(<span class="ty">int</span> capacity, <span class="ty">double</span> leakRatePerSec) {
+        <span class="kw">this</span>.capacity = capacity;
+        <span class="kw">this</span>.leakRatePerNs = leakRatePerSec / <span class="nu">1_000_000_000.0</span>;
+    }
+
+    <span class="an">@Override</span>
+    <span class="kw">public synchronized boolean</span> <span class="fn">allowRequest</span>(<span class="ty">String</span> key) {
+        <span class="ty">long</span> now = System.nanoTime();
+        <span class="ty">BucketState</span> state = buckets.computeIfAbsent(
+            key, k -> <span class="kw">new</span> <span class="ty">BucketState</span>(<span class="nu">0</span>, now)
+        );
+
+        <span class="cm">// Drain queue based on elapsed time</span>
+        <span class="ty">double</span> elapsed = now - state.lastLeakNanos;
+        <span class="ty">double</span> leaked  = elapsed * leakRatePerNs;
+        state.queueSize    = Math.max(<span class="nu">0</span>, state.queueSize - leaked);
+        state.lastLeakNanos = now;
+
+        <span class="kw">if</span> (state.queueSize &lt; capacity) {
+            state.queueSize++;  <span class="cm">// Enqueue request</span>
+            <span class="kw">return true</span>;
+        }
+        <span class="kw">return false</span>; <span class="cm">// Overflow — drop request</span>
+    }
+
+    <span class="an">@Override</span>
+    <span class="kw">public</span> <span class="ty">String</span> <span class="fn">getName</span>() { <span class="kw">return</span> <span class="st">"LeakyBucket"</span>; }
+}</pre>
+  </div>
+
+  <!-- FIXED WINDOW TAB -->
+  <div id="tab-fixed" class="tab-content">
+<pre><span class="cm">// ═══════════════════════════════════════════════════════
+// FixedWindowRateLimiter.java
+// Strategy: count requests per time window; reset at boundary
+// ⚠️ Weakness: double-rate burst at window boundary
+// ═══════════════════════════════════════════════════════</span>
+
+<span class="kw">package</span> com.example.ratelimiter;
+
+<span class="kw">import</span> java.util.concurrent.ConcurrentHashMap;
+<span class="kw">import</span> java.util.concurrent.atomic.AtomicInteger;
+<span class="kw">import</<span>span><span class="kw">import</span> java.util.concurrent.atomic.AtomicLong;
+
+<span class="kw">public class</span> <span class="ty">FixedWindowRateLimiter</span> <span class="kw">implements</span> <span class="ty">RateLimiterStrategy</span> {
+
+    <span class="kw">private static class</span> <span class="ty">WindowState</span> {
+        <span class="ty">AtomicInteger</span> count = <span class="kw">new</span> <span class="ty">AtomicInteger</span>(<span class="nu">0</span>);
+        <span class="ty">AtomicLong</span>    windowStart = <span class="kw">new</span> <span class="ty">AtomicLong</span>(System.currentTimeMillis());
+    }
+
+    <span class="kw">private final int</span>  limit;
+    <span class="kw">private final long</span> windowMs;
+    <span class="kw">private final</span> <span class="ty">ConcurrentHashMap</span>&lt;<span class="ty">String</span>, <span class="ty">WindowState</span>&gt; windows
+        = <span class="kw">new</span> <span class="ty">ConcurrentHashMap</span>&lt;&gt;();
+
+    <span class="kw">public</span> <span class="fn">FixedWindowRateLimiter</span>(<span class="ty">int</span> limit, <span class="ty">long</span> windowSeconds) {
+        <span class="kw">this</span>.limit    = limit;
+        <span class="kw">this</span>.windowMs = windowSeconds * <span class="nu">1000</span>;
+    }
+
+    <span class="an">@Override</span>
+    <span class="kw">public boolean</span> <span class="fn">allowRequest</span>(<span class="ty">String</span> key) {
+        <span class="ty">WindowState</span> ws = windows.computeIfAbsent(key, k -> <span class="kw">new</span> <span class="ty">WindowState</span>());
+        <span class="ty">long</span> now = System.currentTimeMillis();
+
+        <span class="cm">// Check if current window has expired</span>
+        <span class="kw">if</span> (now - ws.windowStart.get() >= windowMs) {
+            <span class="cm">// Reset window atomically</span>
+            ws.windowStart.set(now);
+            ws.count.set(<span class="nu">0</span>);
+        }
+
+        <span class="cm">// Increment and check limit (getAndIncrement is atomic)</span>
+        <span class="kw">return</span> ws.count.getAndIncrement() &lt; limit;
+    }
+
+    <span class="an">@Override</span>
+    <span class="kw">public</span> <span class="ty">String</span> <span class="fn">getName</span>() { <span class="kw">return</span> <span class="st">"FixedWindow"</span>; }
+}</pre>
+  </div>
+
+  <!-- SLIDING WINDOW TAB -->
+  <div id="tab-sliding" class="tab-content">
+<pre><span class="cm">// ═══════════════════════════════════════════════════════
+// SlidingWindowRateLimiter.java
+// Strategy: timestamp log within rolling window
+// Most accurate — no boundary spike problem
+// ═══════════════════════════════════════════════════════</span>
+
+<span class="kw">package</span> com.example.ratelimiter;
+
+<span class="kw">import</span> java.util.*;
+<span class="kw">import</span> java.util.concurrent.ConcurrentHashMap;
+
+<span class="kw">public class</span> <span class="ty">SlidingWindowRateLimiter</span> <span class="kw">implements</span> <span class="ty">RateLimiterStrategy</span> {
+
+    <span class="kw">private final int</span>  limit;
+    <span class="kw">private final long</span> windowMs;
+
+    <span class="cm">// Per user: sorted deque of request timestamps</span>
+    <span class="kw">private final</span> <span class="ty">ConcurrentHashMap</span>&lt;<span class="ty">String</span>, <span class="ty">Deque</span>&lt;<span class="ty">Long</span>&gt;&gt; logs
+        = <span class="kw">new</span> <span class="ty">ConcurrentHashMap</span>&lt;&gt;();
+
+    <span class="kw">public</span> <span class="fn">SlidingWindowRateLimiter</span>(<span class="ty">int</span> limit, <span class="ty">long</span> windowSeconds) {
+        <span class="kw">this</span>.limit    = limit;
+        <span class="kw">this</span>.windowMs = windowSeconds * <span class="nu">1000</span>;
+    }
+
+    <span class="an">@Override</span>
+    <span class="kw">public synchronized boolean</span> <span class="fn">allowRequest</span>(<span class="ty">String</span> key) {
+        <span class="ty">long</span> now = System.currentTimeMillis();
+        <span class="ty">long</span> windowStart = now - windowMs;
+
+        <span class="ty">Deque</span>&lt;<span class="ty">Long</span>&gt; log = logs.computeIfAbsent(key, k -> <span class="kw">new</span> <span class="ty">ArrayDeque</span>&lt;&gt;());
+
+        <span class="cm">// Remove timestamps outside the rolling window</span>
+        <span class="kw">while</span> (!log.isEmpty() &amp;&amp; log.peekFirst() &lt;= windowStart) {
+            log.pollFirst();
+        }
+
+        <span class="kw">if</span> (log.size() &lt; limit) {
+            log.addLast(now);  <span class="cm">// Record this request timestamp</span>
+            <span class="kw">return true</span>;
+        }
+        <span class="kw">return false</span>; <span class="cm">// Window full</span>
+    }
+
+    <span class="an">@Override</span>
+    <span class="kw">public</span> <span class="ty">String</span> <span class="fn">getName</span>() { <span class="kw">return</span> <span class="st">"SlidingWindowLog"</span>; }
+}</pre>
+  </div>
+
+  <!-- SERVICE USAGE TAB -->
+  <div id="tab-service" class="tab-content">
+<pre><span class="cm">// ═══════════════════════════════════════════════════════
+// RateLimiterService.java
+// Shows how a real service uses multiple strategies:
+//  - IP-level:    FixedWindow (cheap, fast)
+//  - User-level:  TokenBucket (burst friendly)
+//  - API key:     SlidingWindow (accurate)
+//  - Global:      LeakyBucket (traffic shaping)
+// ═══════════════════════════════════════════════════════</span>
+
+<span class="kw">package</span> com.example.ratelimiter;
+
+<span class="kw">import</span> java.util.Map;
+
+<span class="kw">public class</span> <span class="ty">RateLimiterService</span> {
+
+    <span class="cm">// Strategies for different contexts</span>
+    <span class="kw">private final</span> <span class="ty">RateLimiterStrategy</span> ipLimiter;
+    <span class="kw">private final</span> <span class="ty">RateLimiterStrategy</span> userLimiter;
+    <span class="kw">private final</span> <span class="ty">RateLimiterStrategy</span> apiKeyLimiter;
+    <span class="kw">private final</span> <span class="ty">RateLimiterStrategy</span> globalLimiter;
+
+    <span class="cm">// Tier-based limits (loaded from config / DB)</span>
+    <span class="kw">private static final</span> <span class="ty">Map</span>&lt;<span class="ty">String</span>, <span class="ty">Integer</span>&gt; TIER_LIMITS = <span class="ty">Map</span>.of(
+        <span class="st">"free"</span>,       <span class="nu">100</span>,
+        <span class="st">"pro"</span>,        <span class="nu">1000</span>,
+        <span class="st">"enterprise"</span>, <span class="ty">Integer</span>.MAX_VALUE
+    );
+
+    <span class="kw">public</span> <span class="fn">RateLimiterService</span>() {
+        <span class="cm">// IP: max 60 req/min per IP (fixed window, cheap)</span>
+        <span class="kw">this</span>.ipLimiter = <span class="kw">new</span> <span class="ty">FixedWindowRateLimiter</span>(<span class="nu">60</span>, <span class="nu">60</span>);
+
+        <span class="cm">// User: burst of 20, 5 req/sec sustained (token bucket)</span>
+        <span class="kw">this</span>.userLimiter = <span class="kw">new</span> <span class="ty">TokenBucketRateLimiter</span>(<span class="nu">20</span>, <span class="nu">5</span>);
+
+        <span class="cm">// API key: 1000 req/hour accurate (sliding window)</span>
+        <span class="kw">this</span>.apiKeyLimiter = <span class="kw">new</span> <span class="ty">SlidingWindowRateLimiter</span>(<span class="nu">1000</span>, <span class="nu">3600</span>);
+
+        <span class="cm">// Global: 10000 req/sec throughput cap (leaky bucket)</span>
+        <span class="kw">this</span>.globalLimiter = <span class="kw">new</span> <span class="ty">LeakyBucketRateLimiter</span>(<span class="nu">500</span>, <span class="nu">10000</span>);
+    }
+
+    <span class="cm">/**
+     * Main entry point — called by filter/interceptor for every request.
+     * @return RateLimitResult with allowed flag + metadata for response headers
+     */</span>
+    <span class="kw">public</span> <span class="ty">RateLimitResult</span> <span class="fn">checkRequest</span>(<span class="ty">String</span> userId, <span class="ty">String</span> ipAddress,
+                                          <span class="ty">String</span> apiKey, <span class="ty">String</span> userTier) {
+        <span class="cm">// 1. Global service-wide cap (protects all downstream)</span>
+        <span class="kw">if</span> (!globalLimiter.<span class="fn">allowRequest</span>(<span class="st">"global"</span>)) {
+            <span class="kw">return</span> <span class="ty">RateLimitResult</span>.<span class="fn">deny</span>(<span class="nu">100</span>, globalLimiter.<span class="fn">getName</span>());
+        }
+
+        <span class="cm">// 2. IP-level (blocks floods from single IPs)</span>
+        <span class="kw">if</span> (!ipLimiter.<span class="fn">allowRequest</span>(ipAddress)) {
+            <span class="kw">return</span> <span class="ty">RateLimitResult</span>.<span class="fn">deny</span>(<span class="nu">60_000</span>, ipLimiter.<span class="fn">getName</span>());
+        }
+
+        <span class="cm">// 3. Tier check — enterprise bypasses further limits</span>
+        <span class="kw">if</span> (<span class="st">"enterprise"</span>.equals(userTier)) {
+            <span class="kw">return</span> <span class="ty">RateLimitResult</span>.<span class="fn">allow</span>(<span class="ty">Integer</span>.MAX_VALUE, <span class="st">"no-limit"</span>);
+        }
+
+        <span class="cm">// 4. API key limit (per-key billing enforcement)</span>
+        <span class="kw">if</span> (apiKey != <span class="kw">null</span> &amp;&amp; !apiKeyLimiter.<span class="fn">allowRequest</span>(apiKey)) {
+            <span class="kw">return</span> <span class="ty">RateLimitResult</span>.<span class="fn">deny</span>(<span class="nu">3_600_000</span>, apiKeyLimiter.<span class="fn">getName</span>());
+        }
+
+        <span class="cm">// 5. User-level limit (per-account burst control)</span>
+        <span class="kw">if</span> (userId != <span class="kw">null</span> &amp;&amp; !userLimiter.<span class="fn">allowRequest</span>(userId)) {
+            <span class="kw">return</span> <span class="ty">RateLimitResult</span>.<span class="fn">deny</span>(<span class="nu">200</span>, userLimiter.<span class="fn">getName</span>());
+        }
+
+        <span class="kw">return</span> <span class="ty">RateLimitResult</span>.<span class="fn">allow</span>(<span class="nu">99</span>, <span class="st">"passed-all-layers"</span>);
+    }
+}
+
+
+<span class="cm">// ═══════════════════════════════════════════════════════
+// RateLimiterFilter.java  (Spring Boot / Jakarta)
+// Intercepts every HTTP request before it hits the controller
+// ═══════════════════════════════════════════════════════</span>
+
+<span class="an">@Component</span>
+<span class="kw">public class</span> <span class="ty">RateLimiterFilter</span> <span class="kw">implements</span> <span class="ty">Filter</span> {
+
+    <span class="an">@Autowired</span>
+    <span class="kw">private</span> <span class="ty">RateLimiterService</span> rateLimiterService;
+
+    <span class="an">@Override</span>
+    <span class="kw">public void</span> <span class="fn">doFilter</span>(<span class="ty">ServletRequest</span> req, <span class="ty">ServletResponse</span> res,
+                          <span class="ty">FilterChain</span> chain) <span class="kw">throws</span> <span class="ty">IOException</span>, <span class="ty">ServletException</span> {
+        <span class="ty">HttpServletRequest</span>  request  = (<span class="ty">HttpServletRequest</span>)  req;
+        <span class="ty">HttpServletResponse</span> response = (<span class="ty">HttpServletResponse</span>) res;
+
+        <span class="ty">String</span> userId   = request.<span class="fn">getHeader</span>(<span class="st">"X-User-Id"</span>);
+        <span class="ty">String</span> ip       = request.<span class="fn">getRemoteAddr</span>();
+        <span class="ty">String</span> apiKey   = request.<span class="fn">getHeader</span>(<span class="st">"X-Api-Key"</span>);
+        <span class="ty">String</span> userTier = request.<span class="fn">getHeader</span>(<span class="st">"X-User-Tier"</span>);
+
+        <span class="ty">RateLimitResult</span> result = rateLimiterService.<span class="fn">checkRequest</span>(
+            userId, ip, apiKey, userTier
+        );
+
+        <span class="cm">// Set standard rate limit response headers</span>
+        response.<span class="fn">setHeader</span>(<span class="st">"X-RateLimit-Remaining"</span>,
+            <span class="ty">String</span>.<span class="fn">valueOf</span>(result.remainingTokens()));
+        response.<span class="fn">setHeader</span>(<span class="st">"X-RateLimit-Strategy"</span>, result.strategy());
+
+        <span class="kw">if</span> (!result.allowed()) {
+            response.<span class="fn">setHeader</span>(<span class="st">"Retry-After"</span>,
+                <span class="ty">String</span>.<span class="fn">valueOf</span>(result.retryAfterMs() / <span class="nu">1000</span>));
+            response.<span class="fn">sendError</span>(<span class="nu">429</span>, <span class="st">"Too Many Requests"</span>);
+            <span class="kw">return</span>;
+        }
+
+        chain.<span class="fn">doFilter</span>(req, res); <span class="cm">// Pass to next filter / controller</span>
+    }
+}</pre>
+  </div>
+</div>
+</section>
+
+<!-- SECTION 6: COMPARISON TABLE -->
+<section id="comparison">
+<div class="container">
+  <div class="section-num">06 — Comparison</div>
+  <h2 class="section-title">Algorithm <span>Comparison</span></h2>
+
+  <table class="algo-table">
+    <thead>
+      <tr>
+        <th>Algorithm</th>
+        <th>Burst?</th>
+        <th>Memory</th>
+        <th>Accuracy</th>
+        <th>Distributed?</th>
+        <th>Best For</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong style="color:var(--orange)">🪙 Token Bucket</strong></td>
+        <td><span class="badge g">YES</span></td>
+        <td><span class="badge g">O(1)</span></td>
+        <td><span class="badge g">High</span></td>
+        <td><span class="badge y">Atomic CAS</span></td>
+        <td style="color:var(--muted)">APIs, user-level limits</td>
+      </tr>
+      <tr>
+        <td><strong style="color:var(--green)">🪣 Leaky Bucket</strong></td>
+        <td><span class="badge r">NO</span></td>
+        <td><span class="badge g">O(1)</span></td>
+        <td><span class="badge g">High</span></td>
+        <td><span class="badge y">Needs sync</span></td>
+        <td style="color:var(--muted)">Traffic shaping, smooth output</td>
+      </tr>
+      <tr>
+        <td><strong style="color:var(--blue)">🪟 Fixed Window</strong></td>
+        <td><span class="badge y">Edge only</span></td>
+        <td><span class="badge g">O(1)</span></td>
+        <td><span class="badge y">Medium</span></td>
+        <td><span class="badge g">Easy (Redis INCR)</span></td>
+        <td style="color:var(--muted)">Simple quotas, internal tools</td>
+      </tr>
+      <tr>
+        <td><strong style="color:var(--purple)">🔄 Sliding Window</strong></td>
+        <td><span class="badge y">Controlled</span></td>
+        <td><span class="badge r">O(N) per user</span></td>
+        <td><span class="badge g">Very High</span></td>
+        <td><span class="badge y">Redis ZSET</span></td>
+        <td style="color:var(--muted)">Strict public APIs</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="two-col" style="margin-top:24px">
+    <div class="hbox blue">
+      <div class="hbox-title">🌐 Distributed System Notes</div>
+      <ul>
+        <li>Use <strong style="color:var(--text)">Redis + Lua scripts</strong> for atomic multi-key operations</li>
+        <li><strong style="color:var(--text)">INCR + EXPIRE</strong> = Fixed Window in Redis</li>
+        <li><strong style="color:var(--text)">ZADD + ZCOUNT</strong> = Sliding Window in Redis</li>
+        <li>Token Bucket: store <code style="color:var(--cyan)">tokens:userId</code> as float in Redis</li>
+        <li>Always set TTL to avoid memory leaks</li>
+      </ul>
+    </div>
+    <div class="hbox pink">
+      <div class="hbox-title">📋 Interview Cheatsheet</div>
+      <ul>
+        <li>Interviewer says "allow bursts" → <strong style="color:var(--text)">Token Bucket</strong></li>
+        <li>Interviewer says "smooth output" → <strong style="color:var(--text)">Leaky Bucket</strong></li>
+        <li>Interviewer says "simple quota" → <strong style="color:var(--text)">Fixed Window</strong></li>
+        <li>Interviewer says "most accurate" → <strong style="color:var(--text)">Sliding Window</strong></li>
+        <li>Always mention: Redis, atomic ops, response headers (X-RateLimit-*)</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="hbox yellow" style="margin-top:20px">
+    <div class="hbox-title">🔑 Key HTTP Headers to Return</div>
+    <ul>
+      <li><code style="color:var(--yellow)">X-RateLimit-Limit</code> — total allowed requests in window</li>
+      <li><code style="color:var(--yellow)">X-RateLimit-Remaining</code> — requests left in current window</li>
+      <li><code style="color:var(--yellow)">X-RateLimit-Reset</code> — epoch time when window resets</li>
+      <li><code style="color:var(--yellow)">Retry-After</code> — seconds until client can retry (on 429)</li>
+    </ul>
+  </div>
+</div>
+</section>
+
+<div style="text-align:center;padding:40px 24px;color:var(--muted);font-family:var(--font-mono);font-size:12px;border-top:1px solid var(--border)">
+  Rate Limiter Notes · System Design Deep Dive · Java Implementation
+</div>
+
+<script>
+function showTab(name) {
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  event.target.classList.add('active');
+}
+</script>
+</body>
+</html>
