@@ -1,5 +1,6 @@
 package week_4_5_6_7;
 import java.util.*;
+import java.util.concurrent.ThreadLocalRandom;
 
 /*
 2. Functional & Non-Functional Requirements
@@ -74,13 +75,15 @@ interface ShortCodeGenerator {
 
 // Base62 Generator
 class Base62Generator implements ShortCodeGenerator {
-    private static final String CHARSET = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-    private Random random = new Random();
+    private static final String CHARSET =
+        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 
     public String generate(String longUrl) {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < 6; i++) {
-            sb.append(CHARSET.charAt(random.nextInt(CHARSET.length())));
+            sb.append(CHARSET.charAt(
+                ThreadLocalRandom.current().nextInt(CHARSET.length())
+            ));
         }
         return sb.toString();
     }
