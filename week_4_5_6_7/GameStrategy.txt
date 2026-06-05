@@ -1,0 +1,313 @@
+// ══════════════════════════════════════════════════════════════════════════════
+// PSEUDO FRAMEWORK FOR ANY BOARD GAME
+// ══════════════════════════════════════════════════════════════════════════════
+
+// 1. POSITION — Where something is on board
+Position {
+    row, col
+    isValid()
+}
+
+// 2. PLAYER — Who is playing
+Player {
+    id          // "X", "O", "RED", etc.
+    getType()   // HUMAN, AI
+}
+
+// 3. MOVE — Action player takes
+Move {
+    from        // starting position (can be null for some games)
+    to          // ending position
+}
+
+// 4. BOARD — Game state (data)
+Board {
+    grid[][]                          // 2D array of cells
+    
+    init()                            // setup board
+    executeMove(move)                 // apply move
+    undoMove(move)                    // revert move
+    getPossibleMoves(player)          // all valid moves
+    isGameOver()                      // game ended?
+    getWinner()                       // who won?
+    display()                         // print board
+}
+
+// 5. GAME — Main controller
+Game {
+    board
+    currentPlayer
+    
+    start()                           // begin game
+    makeMove(move)                    // validate + execute
+    switchTurn()                      // next player
+    isGameOver()
+    getWinner()
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// TEMPLATE FOR ANY GAME
+// ══════════════════════════════════════════════════════════════════════════════
+
+class GAME_NAME {
+    
+    // Step 1: Define Position (coordinates on board)
+    class Position {
+        int row, col;
+        boolean isValid() { return row >= 0 && row < SIZE && col >= 0 && col < SIZE; }
+    }
+    
+    // Step 2: Define Move (what player can do)
+    class Move {
+        Position from, to;
+    }
+    
+    // Step 3: Implement Board (game state + rules)
+    class MyBoard {
+        String[][] grid = new String[SIZE][SIZE];
+        
+        void init() {
+            // Setup starting position
+        }
+        
+        void executeMove(Move m) {
+            // Update grid
+            grid[m.to.row][m.to.col] = currentPlayer;
+        }
+        
+        List<Move> getPossibleMoves(Player p) {
+            // Return all valid moves for player
+            List<Move> moves = new ArrayList<>();
+            for (int r = 0; r < SIZE; r++) {
+                for (int c = 0; c < SIZE; c++) {
+                    if (isValidMove(r, c)) {
+                        moves.add(new Move(r, c));
+                    }
+                }
+            }
+            return moves;
+        }
+        
+        boolean isGameOver() {
+            return getWinner() != null || getPossibleMoves(current).isEmpty();
+        }
+        
+        Player getWinner() {
+            // Check win condition
+            // return winner or null
+        }
+        
+        void display() {
+            // Print grid
+        }
+    }
+    
+    // Step 4: Implement Game (control flow)
+    class MyGame {
+        MyBoard board;
+        Player currentPlayer;
+        
+        void start() {
+            board.init();
+            board.display();
+        }
+        
+        void makeMove(Move m) {
+            if (!isValidMove(m)) return;
+            board.executeMove(m);
+            board.display();
+            switchTurn();
+            checkGameStatus();
+        }
+        
+        void switchTurn() {
+            currentPlayer = (currentPlayer == P1) ? P2 : P1;
+        }
+        
+        void checkGameStatus() {
+            if (board.isGameOver()) {
+                System.out.println("Winner: " + board.getWinner());
+            }
+        }
+    }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// QUICK GAME CHECKLIST
+// ══════════════════════════════════════════════════════════════════════════════
+
+/*
+To implement ANY board game:
+
+☐ 1. Board size? (3x3, 8x8, 6x7, etc.)
+☐ 2. How do players move? (pick cell, slide, drop, from-to, etc.)
+☐ 3. Win condition? (3 in row, capture piece, last move wins, etc.)
+☐ 4. Turn order? (alternate, simultaneous, etc.)
+☐ 5. Valid move validation? (empty cell, path clear, specific rules)
+
+Then code:
+☐ Position class (row, col, isValid)
+☐ Move class (from, to, or just target)
+☐ Board class (grid, init, executeMove, getPossibleMoves, isGameOver, getWinner)
+☐ Game class (start, makeMove, switchTurn, checkGameStatus)
+☐ main() to play
+*/
+
+// ══════════════════════════════════════════════════════════════════════════════
+// EXAMPLES FOR COMMON GAMES
+// ══════════════════════════════════════════════════════════════════════════════
+
+// TIC TAC TOE
+/*
+Board size: 3x3
+Position: (row, col) 0-2
+Move: pick empty cell
+Win: 3 in row/col/diagonal
+Valid: cell must be empty
+*/
+
+// CONNECT 4
+/*
+Board size: 6x7
+Position: (row, col)
+Move: drop piece in column (gravity)
+Win: 4 in row/col/diagonal
+Valid: column not full, piece falls
+*/
+
+// CHESS
+/*
+Board size: 8x8
+Position: (row, col) 0-7
+Move: (from, to)
+Win: checkmate
+Valid: piece can move, king not in check after move
+Special: check detection, multiple pieces with rules
+*/
+
+// CHECKERS
+/*
+Board size: 8x8
+Position: (row, col)
+Move: diagonal (1 or 2 squares)
+Win: capture all pieces or opponent can't move
+Valid: diagonal path clear, can't jump own pieces
+*/
+
+// SNAKE & LADDER
+/*
+Board size: 10x10 (100 squares)
+Position: single number 1-100
+Move: random dice + position
+Win: reach 100
+Valid: advance by dice value
+Special: snake/ladder changes position
+*/
+
+// ══════════════════════════════════════════════════════════════════════════════
+// MINIMAL COMPLETE CODE TEMPLATE
+// ══════════════════════════════════════════════════════════════════════════════
+
+class Position {
+    int row, col;
+    Position(int r, int c) { row = r; col = c; }
+    boolean isValid() { return row >= 0 && row < 3 && col >= 0 && col < 3; }
+}
+
+class Move {
+    Position to;
+    Move(int r, int c) { to = new Position(r, c); }
+}
+
+class Board {
+    String[][] grid = new String[3][3];
+    
+    void init() {
+        for (int i = 0; i < 3; i++)
+            for (int j = 0; j < 3; j++)
+                grid[i][j] = ".";
+    }
+    
+    void executeMove(Move m, String player) {
+        grid[m.to.row][m.to.col] = player;
+    }
+    
+    List<Move> getPossibleMoves() {
+        List<Move> moves = new ArrayList<>();
+        for (int i = 0; i < 3; i++)
+            for (int j = 0; j < 3; j++)
+                if (grid[i][j].equals("."))
+                    moves.add(new Move(i, j));
+        return moves;
+    }
+    
+    String getWinner() {
+        // Check rows/cols/diagonals for 3 in a row
+        return null; // no winner yet
+    }
+    
+    boolean isGameOver() {
+        return getWinner() != null || getPossibleMoves().isEmpty();
+    }
+    
+    void display() {
+        for (int i = 0; i < 3; i++) {
+            for (int j = 0; j < 3; j++)
+                System.out.print(grid[i][j] + " ");
+            System.out.println();
+        }
+    }
+}
+
+class Game {
+    Board board = new Board();
+    String currentPlayer = "X";
+    
+    void start() {
+        board.init();
+        board.display();
+    }
+    
+    void makeMove(int r, int c) {
+        board.executeMove(new Move(r, c), currentPlayer);
+        board.display();
+        currentPlayer = currentPlayer.equals("X") ? "O" : "X";
+    }
+    
+    void play() {
+        start();
+        while (!board.isGameOver()) {
+            // Get move and call makeMove()
+        }
+    }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// KEY POINTS FOR INTERVIEW
+// ══════════════════════════════════════════════════════════════════════════════
+
+/*
+1. INTERFACES (if designing for multiple games)
+   - Position: where things are
+   - Move: what players do
+   - Board: state + rules
+   - Game: controller
+
+2. SEPARATION OF CONCERNS
+   - Board = data + game logic
+   - Game = control flow + turn management
+
+3. VALIDATION
+   - isValidMove() before executeMove()
+   - Simulate move, check if legal, undo if not
+
+4. WIN CONDITIONS
+   - Check after each move
+   - Can be pattern matching (3 in row)
+   - Or state checking (capture all pieces)
+
+5. SCALABILITY
+   - Grid-based games: 2D array
+   - Position-based games: Map or List
+   - Easy to extend to new games with same framework
+*/
