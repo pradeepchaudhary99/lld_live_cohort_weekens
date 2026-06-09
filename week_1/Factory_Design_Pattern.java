@@ -1,5 +1,6 @@
 package week_1;
 
+import java.lang.constant.DirectMethodHandleDesc;
 
 // Discount...
 interface Discount{
@@ -22,17 +23,33 @@ class Diwali_Discount implements Discount{
     }
 }
 
-class DiscountFactory{
-    static Discount getDiscountedPrice(int amount){
-        if(amount < 5000){
-            return new Ten_Discount();
-        }
-        else if(amount > 10000){
-            return new Diwali_Discount();
-        }
-        return null;
+interface DiscountFactory{
+    Discount createDiscount();
+}
+
+class Ten_DiscountFactory implements DiscountFactory{
+    @Override
+    public Discount createDiscount() {
+        return new Ten_Discount();
     }
 }
+
+class PradeepDiscount implements Discount{
+    @Override
+    public int discounted_price(int money) {
+        return 30;
+    }
+}
+
+class PradeepDiscountFactory implements DiscountFactory{
+
+    @Override
+    public Discount createDiscount() {
+        return new PradeepDiscount();
+    }
+    
+}
+
 
 class DiscountCalulator{
     
